@@ -1,31 +1,46 @@
 
-name: Build TrustTunnel ARM64
+name: Build TrustTunnel Prebuilt ARM64 and x64
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
+    name: Build ${{ matrix.arch }}
     runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            platform: linux/arm64
+          - arch: amd64
+            platform: linux/amd64
+
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup QEMU
+      - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
-      - name: Setup Buildx
+      - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build ARM64 OCI image
+      - name: Build OCI image
         run: |
           docker buildx build \
-            --platform linux/arm64 \
-            --output type=oci,dest=trusttunnel-endpoint-arm64.tar \
-            -t trusttunnel-endpoint:arm64 .
+            --platform ${{ matrix.platform }} \
+            --build-arg TT_VERSION=1.1.0 \
+            --file Dockerfile.prebuilt \
+            --output type=oci,dest=trusttunnel-${{ matrix.arch }}.tar \
+            --tag trusttunnel-endpoint:${{ matrix.arch }} .
 
-      - name: Upload image
+      - name: Upload image artifact
         uses: actions/upload-artifact@v4
         with:
-          name: trusttunnel-endpoint-arm64
-          path: trusttunnel-endpoint-arm64.tar
+          name: trusttunnel-${{ matrix.arch }}
+          path: trusttunnel-${{ matrix.arch }}.tar
+          retention-days: 7
+          compression-level: 0
