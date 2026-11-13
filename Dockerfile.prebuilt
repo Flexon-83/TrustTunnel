@@ -1,22 +1,46 @@
-# syntax=docker/dockerfile:1
-FROM debian:bookworm-slim
-ARG TT_VERSION
-ARG TARGETARCH
-ARG TT_RELEASE_BASE_URL="https://github.com/TrustTunnel/TrustTunnel/releases/download"
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl tar iproute2 && rm -rf /var/lib/apt/lists/*
-RUN set -eux; \
-    case "$TARGETARCH" in \
-        amd64) TT_ARCH="x86_64" ;; \
-        arm64) TT_ARCH="aarch64" ;; \
-        *) echo "Unsupported TARGETARCH: $TARGETARCH"; exit 1 ;; \
-    esac; \
-    RELEASE_FILE="trusttunnel-v${TT_VERSION}-linux-${TT_ARCH}.tar.gz"; \
-    curl -fsSL "${TT_RELEASE_BASE_URL}/v${TT_VERSION}/${RELEASE_FILE}" -o /tmp/release.tar.gz; \
-    mkdir -p /tmp/release; \
-    tar -xzf /tmp/release.tar.gz -C /tmp/release; \
-    cp /tmp/release/*/trusttunnel_endpoint /bin/; \
-    cp /tmp/release/*/setup_wizard /bin/
-COPY --chmod=755 /docker-entrypoint.sh /scripts/
-WORKDIR /trusttunnel_endpoint
-VOLUME /trusttunnel_endpoint/
-ENTRYPOINT ["/scripts/docker-entrypoint.sh"]
+
+name: Build TrustTunnel Prebuilt ARM64 and x64
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            platform: linux/arm64
+          - arch: amd64
+            platform: linux/amd64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build OCI image
+        run: |
+          docker buildx build \
+            --platform ${{ matrix.platform }} \
+            --build-arg TT_VERSION=1.1.0 \
+            --file Dockerfile.prebuilt \
+            --output type=oci,dest=trusttunnel-${{ matrix.arch }}.tar \
+            --tag trusttunnel-endpoint:${{ matrix.arch }} .
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: trusttunnel-${{ matrix.arch }}
+          path: trusttunnel-${{ matrix.arch }}.tar
+          retention-days: 7
+          compression-level: 0
