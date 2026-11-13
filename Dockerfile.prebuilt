@@ -1,46 +1,39 @@
 
-name: Build TrustTunnel Prebuilt ARM64 and x64
+FROM debian:bookworm-slim
 
-on:
-  workflow_dispatch:
+ARG TARGETARCH
+ARG TT_VERSION=1.1.0
 
-jobs:
-  build:
-    name: Build ${{ matrix.arch }}
-    runs-on: ubuntu-latest
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      ca-certificates curl tar iproute2 bash && \
+    rm -rf /var/lib/apt/lists/*
 
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: arm64
-            platform: linux/arm64
-          - arch: amd64
-            platform: linux/amd64
+RUN set -eux; \
+    case "$TARGETARCH" in \
+      arm64) TT_ARCH=aarch64 ;; \
+      amd64) TT_ARCH=x86_64 ;; \
+      *) echo "Unsupported architecture: $TARGETARCH"; exit 1 ;; \
+    esac; \
+    FILE="trusttunnel-v${TT_VERSION}-linux-${TT_ARCH}.tar.gz"; \
+    curl -fL --retry 3 \
+      "https://github.com/TrustTunnel/TrustTunnel/releases/download/v${TT_VERSION}/${FILE}" \
+      -o /tmp/trusttunnel.tar.gz; \
+    mkdir -p /tmp/tt; \
+    tar -xzf /tmp/trusttunnel.tar.gz -C /tmp/tt; \
+    find /tmp/tt -type f -name trusttunnel_endpoint \
+      -exec cp {} /usr/local/bin/trusttunnel_endpoint \;; \
+    find /tmp/tt -type f -name setup_wizard \
+      -exec cp {} /usr/local/bin/setup_wizard \;; \
+    test -s /usr/local/bin/trusttunnel_endpoint; \
+    test -s /usr/local/bin/setup_wizard; \
+    chmod +x /usr/local/bin/trusttunnel_endpoint \
+             /usr/local/bin/setup_wizard; \
+    rm -rf /tmp/tt /tmp/trusttunnel.tar.gz
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+COPY docker-entrypoint.sh /scripts/docker-entrypoint.sh
+RUN chmod +x /scripts/docker-entrypoint.sh
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+WORKDIR /trusttunnel_endpoint
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build OCI image
-        run: |
-          docker buildx build \
-            --platform ${{ matrix.platform }} \
-            --build-arg TT_VERSION=1.1.0 \
-            --file Dockerfile.prebuilt \
-            --output type=oci,dest=trusttunnel-${{ matrix.arch }}.tar \
-            --tag trusttunnel-endpoint:${{ matrix.arch }} .
-
-      - name: Upload image artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: trusttunnel-${{ matrix.arch }}
-          path: trusttunnel-${{ matrix.arch }}.tar
-          retention-days: 7
-          compression-level: 0
+ENTRYPOINT ["/scripts/docker-entrypoint.sh"]
